@@ -21,3 +21,4 @@ jobs:
         with:
           name: ReSkateLauncher
           path: out/ReSkateLauncher.exe
+          if-no-files-found: error
