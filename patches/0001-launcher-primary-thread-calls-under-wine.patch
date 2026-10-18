@@ -1,0 +1,162 @@
+From ffa736be174c27bb8a287ba1720a49a1501fde82 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Kenan=20Kasumovi=C4=87?=
+ <46025606+Ken5998@users.noreply.github.com>
+Date: Sun, 18 Oct 2026 09:58:25 +0000
+Subject: [PATCH] fix(launcher): call into the gated child on its primary
+ thread under Wine
+
+---
+ Launcher/launch.cpp | 105 +++++++++++++++++++++++++++++++++++++++++---
+ 1 file changed, 98 insertions(+), 7 deletions(-)
+
+diff --git a/Launcher/launch.cpp b/Launcher/launch.cpp
+index 10c2f5c..4bcc0d5 100644
+--- a/Launcher/launch.cpp
++++ b/Launcher/launch.cpp
+@@ -25,6 +25,7 @@
+ #include "Engine/Game/Build/supported_build.h"
+ #include <algorithm>
+ #include <fstream>
++#include <initializer_list>
+ #include <optional>
+ #include <sstream>
+ #include <stdexcept>
+@@ -93,8 +94,8 @@ private:
+ 
+ class RemoteAllocation {
+ public:
+-    RemoteAllocation(HANDLE process, std::size_t size) : process_(process) {
+-        value_ = VirtualAllocEx(process, nullptr, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
++    RemoteAllocation(HANDLE process, std::size_t size, DWORD protection = PAGE_READWRITE) : process_(process) {
++        value_ = VirtualAllocEx(process, nullptr, size, MEM_RESERVE | MEM_COMMIT, protection);
+         if (!value_) throw std::runtime_error("VirtualAllocEx failed");
+     }
+     ~RemoteAllocation() { if (value_) VirtualFreeEx(process_, value_, 0, MEM_RELEASE); }
+@@ -436,7 +437,96 @@ DWORD run_remote_thread(HANDLE process, std::uintptr_t start, void* parameter,
+     return result;
+ }
+ 
+-RemoteModule inject_dll(HANDLE process, const fs::path& dll) {
++// Under Wine on an emulated x86-64 (FEX on ARM64 handhelds), a thread that
++// another process creates in the gated child never starts: CreateRemoteThread
++// succeeds, and the wait times out with nothing run in Skate.exe. So under Wine
++// the primary thread, held at the entrypoint, makes the call itself: its
++// context is pointed at a stub that calls `start(parameter)`, stores the result
++// and spins, and the original context is put back once the result is in.
++// RESKATE_REMOTE_THREAD_INJECTION=1 keeps CreateRemoteThread under Wine too.
++bool primary_thread_calls() {
++    std::array<wchar_t, 2> value{};
++    if (GetEnvironmentVariableW(L"RESKATE_REMOTE_THREAD_INJECTION", value.data(),
++            static_cast<DWORD>(value.size())) == 1 && value[0] == L'1') return false;
++    const auto ntdll = GetModuleHandleW(L"ntdll.dll");
++    return ntdll && GetProcAddress(ntdll, "wine_get_version") != nullptr;
++}
++
++DWORD run_on_primary_thread(HANDLE process, HANDLE thread, std::uintptr_t start, void* parameter,
++                            std::wstring_view label, DWORD timeout_ms) {
++    constexpr std::size_t result_offset = 0x80;
++    constexpr DWORD poll_ms = 10;
++    RemoteAllocation stub(process, 0x1000, PAGE_EXECUTE_READWRITE);
++    const auto base = reinterpret_cast<std::uintptr_t>(stub.get());
++    const auto result_address = base + result_offset;
++    std::vector<unsigned char> code;
++    const auto bytes = [&code](std::initializer_list<unsigned char> values) { code.insert(code.end(), values); };
++    const auto quad = [&code](std::uint64_t value) {
++        for (unsigned shift = 0; shift < 64; shift += 8) code.push_back(static_cast<unsigned char>(value >> shift));
++    };
++    bytes({0x48, 0x83, 0xE4, 0xF0});                    // and rsp, -16
++    bytes({0x48, 0x83, 0xEC, 0x30});                    // sub rsp, 0x30: shadow space, aligned for the call
++    bytes({0x48, 0xB9}); quad(reinterpret_cast<std::uintptr_t>(parameter)); // mov rcx, parameter
++    bytes({0x48, 0xB8}); quad(start);                   // mov rax, start
++    bytes({0xFF, 0xD0});                                // call rax
++    bytes({0x48, 0xB9}); quad(result_address);          // mov rcx, result
++    bytes({0x48, 0x89, 0x01});                          // mov [rcx], rax
++    bytes({0xC7, 0x41, 0x08, 0x01, 0x00, 0x00, 0x00});  // mov dword [rcx+8], 1
++    bytes({0xEB, 0xFE});                                // jmp $
++    SIZE_T written{};
++    if (!WriteProcessMemory(process, stub.get(), code.data(), code.size(), &written) || written != code.size())
++        win32_failure(std::wstring(L"WriteProcessMemory(") + std::wstring(label) + L" stub)");
++    if (!FlushInstructionCache(process, stub.get(), code.size()))
++        win32_failure(std::wstring(L"FlushInstructionCache(") + std::wstring(label) + L" stub)");
++
++    CONTEXT saved{};
++    saved.ContextFlags = CONTEXT_FULL;
++    if (!GetThreadContext(thread, &saved)) win32_failure(L"GetThreadContext(primary thread)");
++    auto call = saved;
++    call.Rip = base;
++    call.Rsp = saved.Rsp - 0x100;
++    if (!SetThreadContext(thread, &call)) win32_failure(L"SetThreadContext(primary thread)");
++    if (ResumeThread(thread) == static_cast<DWORD>(-1)) win32_failure(L"ResumeThread(primary thread)");
++    struct Result {
++        std::uint64_t value;
++        std::uint32_t done;
++    };
++    for (DWORD waited = 0;;) {
++        Result result{};
++        SIZE_T read{};
++        if (!ReadProcessMemory(process, reinterpret_cast<const void*>(result_address), &result, sizeof(result), &read) ||
++            read != sizeof(result)) win32_failure(std::wstring(L"ReadProcessMemory(") + std::wstring(label) + L" result)");
++        if (result.done) {
++            // The thread spins in the stub now; put it back at the entrypoint, still gated.
++            if (SuspendThread(thread) == static_cast<DWORD>(-1)) win32_failure(L"SuspendThread(primary thread)");
++            if (!SetThreadContext(thread, &saved)) win32_failure(L"SetThreadContext(primary thread restore)");
++            return static_cast<DWORD>(result.value);
++        }
++        const auto wait = WaitForSingleObject(process, poll_ms);
++        if (wait == WAIT_OBJECT_0)
++            throw std::runtime_error(utf8(L"Skate.exe exited during " + std::wstring(label)));
++        if (wait != WAIT_TIMEOUT) win32_failure(std::wstring(L"Wait for ") + std::wstring(label));
++        waited += poll_ms;
++        if (timeout_ms != INFINITE && waited >= timeout_ms)
++            throw std::runtime_error(utf8(std::wstring(label) + L" timed out after " +
++                std::to_wstring(waited / 1000) + L" s"));
++        if (waited % remote_wait_ms == 0)
++            dingosdk::logging::write(dingosdk::logging::Level::info, dingosdk::logging::Channel::launcher, std::wstring(label) +
++                L" still running after " + std::to_wstring(waited / 1000) + L" s (merging mods can take a few minutes)");
++    }
++}
++
++// Calls `start(parameter)` in the gated child: on a remote thread, or on the
++// primary thread under Wine (primary_thread_calls). An emulated x86-64 is slower,
++// so a bounded wait gets four times as long there.
++DWORD run_in_child(HANDLE process, HANDLE primary_thread, std::uintptr_t start, void* parameter,
++                   std::wstring_view label, DWORD timeout_ms = remote_wait_ms) {
++    if (!primary_thread_calls()) return run_remote_thread(process, start, parameter, label, timeout_ms);
++    return run_on_primary_thread(process, primary_thread, start, parameter, label,
++        timeout_ms == INFINITE ? INFINITE : timeout_ms * 4);
++}
++
++RemoteModule inject_dll(HANDLE process, HANDLE primary_thread, const fs::path& dll) {
+     const auto path = dll.wstring();
+     const auto byte_count = (path.size() + 1) * sizeof(wchar_t);
+     RemoteAllocation remote_path(process, byte_count);
+@@ -448,9 +538,10 @@ RemoteModule inject_dll(HANDLE process, const fs::path& dll) {
+     if (!hook_note.empty())
+         dingosdk::logging::write(dingosdk::logging::Level::warning, dingosdk::logging::Channel::launcher, hook_note);
+     std::wostringstream address;
+-    address << L"Starting ordinary LoadLibraryW injection at 0x" << std::hex << loader;
++    address << L"Starting ordinary LoadLibraryW injection at 0x" << std::hex << loader
++            << (primary_thread_calls() ? L" on the gated primary thread" : L"");
+     dingosdk::logging::write(dingosdk::logging::Level::info, dingosdk::logging::Channel::launcher, address.str());
+-    const auto loader_result = run_remote_thread(process, loader, remote_path.get(), L"LoadLibraryW");
++    const auto loader_result = run_in_child(process, primary_thread, loader, remote_path.get(), L"LoadLibraryW");
+     // A thread exit code is only 32 bits and cannot carry an x64 HMODULE. Confirm
+     // success and obtain the full module base from the target's module list.
+     const auto module = find_remote_module(process, dll);
+@@ -882,14 +973,14 @@ DWORD start_game(const Session& session, const launcher::LaunchOptions& options,
+         loader_ready << L", skipped " << exiting << L" already exiting";
+     logging::write(logging::Level::info, logging::Channel::launcher, loader_ready.str());
+ 
+-    const auto remote_dll = inject_dll(child.process(), paths.dll);
++    const auto remote_dll = inject_dll(child.process(), child.primary_thread(), paths.dll);
+     const auto initialize_address = remote_dll.base + initialize_rva;
+     if (initialize_address < remote_dll.base || initialize_rva >= remote_dll.size)
+         throw std::runtime_error("Remote DingoSDKDebugInitialize address is invalid");
+     std::wostringstream initializing;
+     initializing << L"Calling DingoSDKDebugInitialize at 0x" << std::hex << initialize_address;
+     logging::write(logging::Level::info, logging::Channel::launcher, initializing.str());
+-    const auto initialized = run_remote_thread(child.process(), initialize_address, nullptr,
++    const auto initialized = run_in_child(child.process(), child.primary_thread(), initialize_address, nullptr,
+         L"DingoSDKDebugInitialize", initialize_wait_ms);
+     if (!initialized) throw std::runtime_error("DingoSDKDebugInitialize returned FALSE");
+     logging::write(logging::Level::info, logging::Channel::launcher, L"ReSkate.dll initialization confirmed");

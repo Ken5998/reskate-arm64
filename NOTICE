@@ -1,0 +1,19 @@
+reskate-arm64
+https://github.com/Ken5998/reskate-arm64
+
+Copyright (c) 2026 Kenan Kasumović
+
+Licensed under the GNU General Public License, version 3 (see LICENSE), the
+license of ReSkate.
+
+This repository makes ReSkate, by Dingo Shenanigans and its contributors,
+run on ARM64 Linux handhelds through Proton and FEX.
+ReSkate: https://github.com/Dingo-Shenanigans/ReSkate
+Licensed under the GNU General Public License, version 3.
+The patches in patches/ change ReSkate; the workflows download ReSkate from
+its own repository at build time and build the launcher from that source
+with the patches applied.
+
+ReSkate is a fan project, not affiliated with or endorsed by Electronic Arts
+or Full Circle, and neither is this repository. skate. is a trademark of
+Electronic Arts. No game files are included here.
