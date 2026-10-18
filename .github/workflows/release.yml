@@ -1,6 +1,6 @@
 name: Release
 
-# Publishes the patched ReSkateLauncher.exe as release vVERSION (the VERSION
+# Publishes the patched ReSkateLauncher.exe and ReSkate.dll as release vVERSION (the VERSION
 # file). It holds no game files; ReSkate.dll comes from ReSkate's own release.
 
 on:
@@ -19,7 +19,7 @@ jobs:
           fetch-depth: 0
       - name: Build the patched launcher
         shell: bash
-        run: scripts/build-launcher.sh out
+        run: scripts/build.sh out
       - name: Publish the release
         shell: bash
         env:
@@ -27,16 +27,16 @@ jobs:
         run: |
           version="$(cat VERSION)"
           tag="$(python -c 'import json; print(json.load(open("upstream.json"))["tag"])')"
-          archive=out/ReSkateLauncher-armadaos.zip
-          (cd out && 7z a -tzip ReSkateLauncher-armadaos.zip ReSkateLauncher.exe > /dev/null)
+          archive=out/ReSkate-armadaos.zip
+          (cd out && 7z a -tzip ReSkate-armadaos.zip ReSkateLauncher.exe ReSkate.dll > /dev/null)
           sha256="$(sha256sum "$archive" | cut -d' ' -f1)"
           scripts/release-notes.sh "v$version" > notes.md
           cat >> notes.md <<NOTES
           ## Install
 
-          ReSkate's launcher ${tag#v}, patched to start skate. under Proton on ARM64 Linux handhelds with FEX, such as the Retroid Pocket 6 on ArmadaOS. Use it with ReSkate.dll from [ReSkate ${tag#v}](https://github.com/Dingo-Shenanigans/ReSkate/releases/tag/$tag).
+          ReSkate ${tag#v}'s launcher and ReSkate.dll, patched to run skate. under Proton on ARM64 Linux handhelds with FEX, such as the Retroid Pocket 6 on ArmadaOS. Everything else comes from [ReSkate ${tag#v}](https://github.com/Dingo-Shenanigans/ReSkate/releases/tag/$tag).
 
-          On the device, in Desktop Mode, scripts/setup-armadaos.sh does everything: it puts ReSkate ${tag#v} and this launcher in ~/ReSkate, downloads the game build ReSkate supports with the native ARM64 DepotDownloader, and prints the Steam launch option. To update by hand, replace ReSkateLauncher.exe in your ReSkate folder with the one in ReSkateLauncher-armadaos.zip.
+          On the device, in Desktop Mode, scripts/setup-armadaos.sh does everything: it puts ReSkate ${tag#v} and these two files in ~/ReSkate, downloads the game build ReSkate supports with the native ARM64 DepotDownloader, and prints the Steam launch option. To update by hand, replace ReSkateLauncher.exe and ReSkate.dll in your ReSkate folder with the ones in ReSkate-armadaos.zip.
 
           No game files are included. SHA-256: \`$sha256\`
           NOTES

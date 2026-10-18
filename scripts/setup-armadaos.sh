@@ -24,9 +24,9 @@ curl -fL# -o "$work/reskate.zip" \
   "https://github.com/Dingo-Shenanigans/ReSkate/releases/download/$tag/ReSkate-${tag#v}.zip"
 python3 -m zipfile -e "$work/reskate.zip" "$dir"
 
-echo "== Patched launcher"
+echo "== Patched launcher and ReSkate.dll"
 curl -fL# -o "$work/launcher.zip" \
-  "https://github.com/$overlay/releases/latest/download/ReSkateLauncher-armadaos.zip"
+  "https://github.com/$overlay/releases/latest/download/ReSkate-armadaos.zip"
 python3 -m zipfile -e "$work/launcher.zip" "$dir"
 
 echo "== skate. build $manifest (about 14 GB; scan the QR code with the Steam app)"

@@ -1,0 +1,47 @@
+From 56085e98531a1bdceb838efe366a23680f4f1bcc Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Kenan=20Kasumovi=C4=87?=
+ <46025606+Ken5998@users.noreply.github.com>
+Date: Sun, 18 Oct 2026 10:35:39 +0000
+Subject: [PATCH] fix(hooks): write hooks without suspending other threads
+ under Wine
+
+---
+ Engine/Core/Hooks/hooks.cpp | 15 ++++++++++++++-
+ 1 file changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/Engine/Core/Hooks/hooks.cpp b/Engine/Core/Hooks/hooks.cpp
+index 974fb1a..95f0520 100644
+--- a/Engine/Core/Hooks/hooks.cpp
++++ b/Engine/Core/Hooks/hooks.cpp
+@@ -112,6 +112,19 @@ struct Threads {
+         return error;
+     }
+ };
++// Under Wine on an x86 emulator such as FEX, suspending every thread for each transaction can
++// leave a resumed thread stopped for good (seen on ARM64 holding the process heap lock, which
++// hangs the game). There hooks are written without enlisting the other threads;
++// RESKATE_HOOK_SUSPEND_THREADS=1 enlists them again.
++bool enlist_threads() {
++    static const bool value = [] {
++        char flag[2]{};
++        if (GetEnvironmentVariableA("RESKATE_HOOK_SUSPEND_THREADS", flag, sizeof(flag)) == 1 && flag[0] == '1') return true;
++        const auto ntdll = GetModuleHandleW(L"ntdll.dll");
++        return !(ntdll && GetProcAddress(ntdll, "wine_get_version"));
++    }();
++    return value;
++}
+ struct Change { Hook* hook; bool attach; };
+ HookStatus transact(const std::vector<Change>& changes) {
+     if (changes.empty()) return HookOk;
+@@ -120,7 +133,7 @@ HookStatus transact(const std::vector<Change>& changes) {
+     // records off the shared heap for the same reason, including commit/abort.
+     for (unsigned attempt = 0; attempt < 4; ++attempt) {
+         Threads threads;
+-        auto error = threads.collect();
++        auto error = enlist_threads() ? threads.collect() : NO_ERROR;
+         if (error != NO_ERROR) return status(error);
+         error = DetourTransactionBegin();
+         if (error != NO_ERROR) return status(failure("begin transaction", error));
+-- 
+2.43.0
+

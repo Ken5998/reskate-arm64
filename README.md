@@ -6,11 +6,17 @@ as the Retroid Pocket 6 with ArmadaOS.
 
 skate. is a Windows x86-64 game, so on these handhelds it runs under Proton
 with FEX emulating x86-64; there is no native port. ReSkate itself works there
-with one change, which this repository carries: its launcher loads
-`ReSkate.dll` into the game on a thread it creates from outside, and under
-FEX such a thread never starts. The patched launcher makes the game's own
-main thread, held at its entrypoint, do the loading instead. On Windows the
-launcher behaves as before.
+with two changes, which this repository carries:
+
+- Its launcher loads `ReSkate.dll` into the game on a thread it creates from
+  outside, and under FEX such a thread never starts. The patched launcher
+  makes the game's own main thread, held at its entrypoint, do the loading.
+- `ReSkate.dll` suspends every thread of the game each time it installs a
+  hook. Under FEX a thread can stay stopped after that, holding a lock the
+  others need, and the game hangs on a black screen once its window opens.
+  Under Wine the patched DLL installs hooks without suspending threads.
+
+On Windows both behave as before.
 
 This repository is an overlay: a patch, scripts and CI. It never contains the
 game or files from it.
@@ -25,7 +31,7 @@ You need skate. in your Steam library (it is free) and about 14 GB free.
    curl -fsSL https://raw.githubusercontent.com/Ken5998/reskate-arm64/main/scripts/setup-armadaos.sh | bash
    ```
 
-   It puts ReSkate and the patched launcher in `~/ReSkate` and downloads the
+   It puts ReSkate, the patched launcher and the patched `ReSkate.dll` in `~/ReSkate` and downloads the
    game build ReSkate supports with the native ARM64
    [DepotDownloader](https://github.com/SteamRE/DepotDownloader) (the
    launcher's own Windows copy crashes under FEX). Scan the QR code it shows
@@ -49,13 +55,14 @@ in the loader.
 | Path | What it does |
 | --- | --- |
 | `upstream.json` | The ReSkate release and commit the patch is for, and the Steam depot and manifest of the game build it supports. |
-| `patches/` | The launcher change: under Wine, calls into the game run on its gated primary thread instead of `CreateRemoteThread`. `RESKATE_REMOTE_THREAD_INJECTION=1` turns it off. |
+| `patches/` | The two changes. Under Wine the launcher calls into the game on its gated primary thread instead of `CreateRemoteThread` (`RESKATE_REMOTE_THREAD_INJECTION=1` turns it off), and hooks are installed without suspending threads (`RESKATE_HOOK_SUSPEND_THREADS=1` turns it off). |
 | `scripts/prepare.sh` | Checks out ReSkate at that commit and applies the patches. |
-| `scripts/build-launcher.sh` | Builds `ReSkateLauncher.exe` with Visual Studio 2022, as CI does on Windows. |
+| `scripts/build.sh` | Builds `ReSkateLauncher.exe` and `ReSkate.dll` with Visual Studio 2022 and Rust, as CI does on Windows. |
 | `scripts/setup-armadaos.sh` | The install above. |
 
-Releases hold only `ReSkateLauncher.exe`; `ReSkate.dll` comes from ReSkate's
-own release of the same version.
+Releases hold only `ReSkateLauncher.exe` and `ReSkate.dll`; everything else
+comes from ReSkate's own release of the same version. These builds never
+update themselves, so ReSkate's own updates do not replace them.
 
 ## License
 
