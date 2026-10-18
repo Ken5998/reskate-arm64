@@ -57,12 +57,26 @@ If you first tried an arm64 Proton, delete the game's prefix
 one: its Visual C++ libraries are the wrong architecture and Skate.exe stops
 in the loader.
 
+## Speed
+
+skate. moves the game on by one step per frame, so below 60 frames a second
+everything runs in slow motion even when the screen still shows 60 fps (that is
+gamescope's count, not the game's). ReSkate's Performance HUD (in its settings,
+under PERFORMANCE) shows the real figure on the CLIENT line: a client frame over
+16.7 ms means slow motion.
+
+ReSkate's engine tweaks, normally set from its console, can be set from the
+launch options too, before `bash -c`: `RESKATE_PERF_GI=30` updates the global
+illumination 30 times a second instead of every frame, `RESKATE_PERF_MESHTREE=1`
+culls meshes through the game's octree, and `RESKATE_PERF_JOBWAKE=50` lets idle
+job workers spin for 50 µs. Try one at a time and compare the CLIENT line.
+
 ## What is here
 
 | Path | What it does |
 | --- | --- |
 | `upstream.json` | The ReSkate release and commit the patch is for, and the Steam depot and manifest of the game build it supports. |
-| `patches/` | The three changes. Under Wine the launcher calls into the game on its gated primary thread instead of `CreateRemoteThread` (`RESKATE_REMOTE_THREAD_INJECTION=1` turns it off), hooks are installed without suspending threads (`RESKATE_HOOK_SUSPEND_THREADS=1` turns it off), and memory reads check the pages first so they never fault (`RESKATE_PEEK_EXCEPTIONS=1` turns it off). |
+| `patches/` | The four changes. Under Wine the launcher calls into the game on its gated primary thread instead of `CreateRemoteThread` (`RESKATE_REMOTE_THREAD_INJECTION=1` turns it off), hooks are installed without suspending threads (`RESKATE_HOOK_SUSPEND_THREADS=1` turns it off), memory reads check the pages first so they never fault (`RESKATE_PEEK_EXCEPTIONS=1` turns it off), and the UI pointer hit-test is skipped while the game's mouse is still unknown (`RESKATE_UI_POINTER_UNKNOWN_TESTS=1` turns it off); the engine tweaks also read `RESKATE_PERF_*` launch values. |
 | `scripts/prepare.sh` | Checks out ReSkate at that commit and applies the patches. |
 | `scripts/build.sh` | Builds `ReSkateLauncher.exe` and `ReSkate.dll` with Visual Studio 2022 and Rust, as CI does on Windows. |
 | `scripts/setup-armadaos.sh` | The install above. |

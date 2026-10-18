@@ -1,0 +1,145 @@
+From e955974017c94b47be5243adf4cd4802034daf32 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Kenan=20Kasumovi=C4=87?=
+ <46025606+Ken5998@users.noreply.github.com>
+Date: Sun, 18 Oct 2026 18:37:04 +0000
+Subject: [PATCH] perf(ui): skip the pointer hit-test while the mouse is
+ unknown under Wine
+
+Under Wine the engine can build its mouse before the UI pointer hooks are
+in, so the mouse stays unknown and the hit-test ran every frame (1.4 ms a
+frame on an Adreno handheld under FEX). An unknown mouse now counts as no
+cursor there; RESKATE_UI_POINTER_UNKNOWN_TESTS=1 keeps the old behaviour.
+The first hit-test logs whether the mouse is known.
+
+Engine tweaks also read launch-time values from RESKATE_PERF_GI,
+RESKATE_PERF_MESHTREE and RESKATE_PERF_JOBWAKE, for devices without a
+keyboard to open the console.
+---
+ Extension/Settings/engine_tweaks.cpp | 20 +++++++++++++
+ Extension/UI/ui_pointer_skip.cpp     | 45 ++++++++++++++++++++++++++--
+ 2 files changed, 62 insertions(+), 3 deletions(-)
+
+diff --git a/Extension/Settings/engine_tweaks.cpp b/Extension/Settings/engine_tweaks.cpp
+index 09d8d40..b0f8f4b 100644
+--- a/Extension/Settings/engine_tweaks.cpp
++++ b/Extension/Settings/engine_tweaks.cpp
+@@ -11,6 +11,7 @@
+ #include <array>
+ #include <atomic>
+ #include <bit>
++#include <cstdlib>
+ #include <format>
+ #include <mutex>
+ 
+@@ -332,6 +333,25 @@ bool install(std::uintptr_t b) noexcept {
+         if (available(tweak) && !set(tweak, default_value(tweak), error))
+             logging::log(logging::Level::warning, logging::Channel::runtime, "Engine tweaks: {} left off: {}", name(tweak), error);
+     }
++    // Launch-time values for the tweaks the console sets (`perf gi`, `perf meshtree`, `perf jobwake`),
++    // for a handheld with no keyboard to open the console on: RESKATE_PERF_GI=30 and so on.
++    struct FromEnvironment { Tweak tweak; const char* variable; };
++    for (const auto [tweak, variable] : {FromEnvironment{Tweak::gi, "RESKATE_PERF_GI"},
++             FromEnvironment{Tweak::mesh_tree, "RESKATE_PERF_MESHTREE"}, FromEnvironment{Tweak::job_wake, "RESKATE_PERF_JOBWAKE"}}) {
++        char text[32]{};
++        const auto length = GetEnvironmentVariableA(variable, text, sizeof(text));
++        if (!length || length >= sizeof(text)) continue;
++        char* end{};
++        const double value = std::strtod(text, &end);
++        std::string error;
++        if (end == text || *end) error = "not a number";
++        else if (available(tweak)) (void)set(tweak, value, error);
++        else error = "not available for this build";
++        if (error.empty())
++            logging::log(logging::Level::info, logging::Channel::runtime, "Engine tweaks: {} = {} from {}.", name(tweak), value, variable);
++        else
++            logging::log(logging::Level::warning, logging::Channel::runtime, "Engine tweaks: {}={} ignored: {}", variable, text, error);
++    }
+     return missing.empty();
+ }
+ 
+diff --git a/Extension/UI/ui_pointer_skip.cpp b/Extension/UI/ui_pointer_skip.cpp
+index 449afa7..74025a5 100644
+--- a/Extension/UI/ui_pointer_skip.cpp
++++ b/Extension/UI/ui_pointer_skip.cpp
+@@ -27,17 +27,53 @@ std::atomic<std::uintptr_t> mouse{};
+ std::atomic<bool> skipping{true}, installed{};
+ std::atomic<std::uint64_t> skipped{}, tested{};
+ 
++// Under Wine the engine can build its mouse before these hooks are in (the DLL arrives later than
++// on Windows), so the mouse stays unknown until the game next turns a cursor on or off. There an
++// unknown mouse counts as no cursor, or the hit-test would run every frame of the session; the
++// next cursor change hands the mouse over. RESKATE_UI_POINTER_UNKNOWN_TESTS=1 keeps testing.
++bool unknown_means_no_cursor() noexcept {
++    static const bool value = [] {
++        char buffer[8]{};
++        if (GetEnvironmentVariableA("RESKATE_UI_POINTER_UNKNOWN_TESTS", buffer, sizeof(buffer)) && buffer[0] == '1')
++            return false;
++        const auto ntdll = GetModuleHandleW(L"ntdll.dll");
++        return ntdll && GetProcAddress(ntdll, "wine_get_version");
++    }();
++    return value;
++}
++
+ // True while a cursor is or may be on screen: asked for, applied, or forced on. Unknown counts
+-// as on, so nothing is skipped until the game has shown which mouse it uses.
++// as on, so nothing is skipped until the game has shown which mouse it uses (but see above).
+ bool cursor_in_use() noexcept {
+     const auto m = mouse.load(std::memory_order_acquire);
+     std::uint8_t applied{}, requested{};
+     std::int32_t forced{};
+-    if (!m || !memory::peek(m + up::mouse_cursor_applied, applied) || !memory::peek(m + up::mouse_cursor_requested, requested) ||
++    if (!m) return !unknown_means_no_cursor();
++    if (!memory::peek(m + up::mouse_cursor_applied, applied) || !memory::peek(m + up::mouse_cursor_requested, requested) ||
+         !memory::peek(m + up::mouse_force_count, forced)) return true;
+     return applied || requested || forced > 0;
+ }
+ 
++// Once, at the first hit-test: whether the mouse is known and what its cursor state is.
++void log_first_test() noexcept {
++    static std::atomic<bool> logged{};
++    if (logged.exchange(true, std::memory_order_relaxed)) return;
++    const auto error = GetLastError();
++    const auto m = mouse.load(std::memory_order_acquire);
++    std::uint8_t applied{}, requested{};
++    std::int32_t forced{};
++    if (m) {
++        (void)memory::peek(m + up::mouse_cursor_applied, applied);
++        (void)memory::peek(m + up::mouse_cursor_requested, requested);
++        (void)memory::peek(m + up::mouse_force_count, forced);
++    }
++    logging::log(logging::Level::info, logging::Channel::ui,
++        "UI pointer: first hit-test {}; mouse {} (cursor applied {}, requested {}, forced {}).",
++        skipping.load(std::memory_order_relaxed) && !cursor_in_use() ? "skipped" : "run", m ? "known" : "unknown",
++        applied, requested, forced);
++    SetLastError(error);
++}
++
+ std::uintptr_t construct_hook(std::uintptr_t m, std::uintptr_t a, std::uintptr_t b, std::uintptr_t c) {
+     const auto result = original_construct(m, a, b, c);
+     mouse.store(m, std::memory_order_release);
+@@ -63,6 +99,7 @@ void force_cursor_hook(std::uintptr_t m, std::uintptr_t delta) {
+     original_force(m, delta);
+ }
+ void pointer_still_hook(std::uintptr_t ui, std::uintptr_t a, std::uintptr_t b, std::uintptr_t c) {
++    log_first_test();
+     if (skipping.load(std::memory_order_relaxed) && !cursor_in_use()) {
+         skipped.fetch_add(1, std::memory_order_relaxed);
+         return;
+@@ -72,6 +109,7 @@ void pointer_still_hook(std::uintptr_t ui, std::uintptr_t a, std::uintptr_t b, s
+     original_still(ui, a, b, c);
+ }
+ void pointer_moved_hook(std::uintptr_t ui, std::uintptr_t a, std::uintptr_t b, std::uintptr_t c) {
++    log_first_test();
+     if (skipping.load(std::memory_order_relaxed) && !cursor_in_use()) {
+         skipped.fetch_add(1, std::memory_order_relaxed);
+         return;
+@@ -134,7 +172,8 @@ std::string status() {
+     }
+     return std::format("UI pointer skip {}: game cursor {}; {} hit-tests skipped, {} run since launch "
+         "(mouse force {}, deferral {}, asked {}, applied {}).",
+-        skipping.load() ? "on" : "off", !m ? "not seen yet (nothing skipped)" : cursor_in_use() ? "on" : "off",
++        skipping.load() ? "on" : "off", !m ? (unknown_means_no_cursor() ? "not seen yet (taken as off under Wine)" : "not seen yet (nothing skipped)")
++            : cursor_in_use() ? "on" : "off",
+         skipped.load(), tested.load(), forced, deferred, requested, applied);
+ }
+ }
