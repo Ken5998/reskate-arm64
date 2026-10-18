@@ -16,10 +16,11 @@ with three changes, which this repository carries:
   others need, and the game hangs on a black screen once its window opens.
   Under Wine the patched DLL installs hooks without suspending threads.
 - `ReSkate.dll` reads game memory with a plain copy that catches an access
-  violation when the address is bad. Under FEX the game can unwind such a
-  fault to the wrong place and close a few minutes into loading. Under Wine
-  the patched DLL reads through `ReadProcessMemory`, which fails without a
-  fault.
+  violation when the address is bad, or with `ReadProcessMemory`, which
+  faults inside Wine the same way. Under FEX such a fault can unwind to the
+  wrong place and close the game. Under Wine the patched DLL first checks the
+  pages with `VirtualQuery` and copies only readable memory, so a bad address
+  never faults.
 
 On Windows all three behave as before.
 
@@ -60,7 +61,7 @@ in the loader.
 | Path | What it does |
 | --- | --- |
 | `upstream.json` | The ReSkate release and commit the patch is for, and the Steam depot and manifest of the game build it supports. |
-| `patches/` | The three changes. Under Wine the launcher calls into the game on its gated primary thread instead of `CreateRemoteThread` (`RESKATE_REMOTE_THREAD_INJECTION=1` turns it off), hooks are installed without suspending threads (`RESKATE_HOOK_SUSPEND_THREADS=1` turns it off), and memory reads never fault (`RESKATE_PEEK_EXCEPTIONS=1` turns it off). |
+| `patches/` | The three changes. Under Wine the launcher calls into the game on its gated primary thread instead of `CreateRemoteThread` (`RESKATE_REMOTE_THREAD_INJECTION=1` turns it off), hooks are installed without suspending threads (`RESKATE_HOOK_SUSPEND_THREADS=1` turns it off), and memory reads check the pages first so they never fault (`RESKATE_PEEK_EXCEPTIONS=1` turns it off). |
 | `scripts/prepare.sh` | Checks out ReSkate at that commit and applies the patches. |
 | `scripts/build.sh` | Builds `ReSkateLauncher.exe` and `ReSkate.dll` with Visual Studio 2022 and Rust, as CI does on Windows. |
 | `scripts/setup-armadaos.sh` | The install above. |
