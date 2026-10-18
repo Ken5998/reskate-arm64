@@ -20,7 +20,8 @@ with three changes, which this repository carries:
   faults inside Wine the same way. Under FEX such a fault can unwind to the
   wrong place and close the game. Under Wine the patched DLL first checks the
   pages with `VirtualQuery` and copies only readable memory, so a bad address
-  never faults.
+  never faults. Each thread remembers the readable regions it found for a
+  quarter of a second, so the check costs little on reads made every frame.
 
 On Windows all three behave as before.
 

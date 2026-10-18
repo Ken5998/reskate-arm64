@@ -1,18 +1,18 @@
-From b011f7d27da1f4e9e02e66851d416e9737b73ab0 Mon Sep 17 00:00:00 2001
+From 9e87a21a27fb050b72b5b7e93e3d0e1ec7da6f8e Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Kenan=20Kasumovi=C4=87?=
  <46025606+Ken5998@users.noreply.github.com>
 Date: Sun, 18 Oct 2026 11:30:12 +0000
 Subject: [PATCH] fix(memory): read without faulting under Wine
 
 ---
- Engine/Core/Platform/memory.h | 43 +++++++++++++++++++++++++++++++++++
- 1 file changed, 43 insertions(+)
+ Engine/Core/Platform/memory.h | 54 +++++++++++++++++++++++++++++++++++
+ 1 file changed, 54 insertions(+)
 
 diff --git a/Engine/Core/Platform/memory.h b/Engine/Core/Platform/memory.h
-index 403a642..c2b968d 100644
+index 403a642..39fab6d 100644
 --- a/Engine/Core/Platform/memory.h
 +++ b/Engine/Core/Platform/memory.h
-@@ -7,9 +7,49 @@
+@@ -7,9 +7,60 @@
  
  namespace dingosdk::memory {
  inline constexpr std::uintptr_t highest_user_address = 0x00007fffffffffffULL;
@@ -31,8 +31,17 @@ index 403a642..c2b968d 100644
 +    }();
 +    return value;
 +}
++// VirtualQuery is a system call, and under FEX a slow one, while peek runs on paths that read
++// game objects every frame. Each thread keeps the last few readable regions it found for a
++// quarter of a second, so most reads skip the query.
++struct ReadableRegion { std::uintptr_t begin, end; std::uint64_t checked_at; };
++inline thread_local ReadableRegion readable_regions[8]{};
++inline thread_local unsigned next_readable_region{};
 +inline bool readable_range(std::uintptr_t address, std::size_t size) noexcept {
++    const auto now = GetTickCount64();
 +    const auto end = address + size;
++    for (const auto& region : readable_regions)
++        if (region.begin <= address && end <= region.end && now - region.checked_at < 250) return true;
 +    while (address < end) {
 +        MEMORY_BASIC_INFORMATION region{};
 +        if (!VirtualQuery(reinterpret_cast<const void*>(address), &region, sizeof(region)) || region.State != MEM_COMMIT ||
@@ -41,7 +50,9 @@ index 403a642..c2b968d 100644
 +        if (protection != PAGE_READONLY && protection != PAGE_READWRITE && protection != PAGE_WRITECOPY &&
 +            protection != PAGE_EXECUTE_READ && protection != PAGE_EXECUTE_READWRITE && protection != PAGE_EXECUTE_WRITECOPY)
 +            return false;
-+        address = reinterpret_cast<std::uintptr_t>(region.BaseAddress) + region.RegionSize;
++        const auto begin = reinterpret_cast<std::uintptr_t>(region.BaseAddress);
++        address = begin + region.RegionSize;
++        readable_regions[next_readable_region++ % 8] = {begin, address, now};
 +    }
 +    return true;
 +}
@@ -62,7 +73,7 @@ index 403a642..c2b968d 100644
      SIZE_T count{};
      return ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<const void*>(address), destination, size, &count) && count == size;
  }
-@@ -23,6 +63,7 @@ bool read(std::uintptr_t address, T& value) noexcept { return read_bytes(address
+@@ -23,6 +74,7 @@ bool read(std::uintptr_t address, T& value) noexcept { return read_bytes(address
  inline bool peek_bytes(std::uintptr_t address, void* destination, std::size_t size) noexcept {
      if (!destination || !size || size > highest_user_address || address < 0x10000 ||
          address > highest_user_address - size) return false;
@@ -70,7 +81,7 @@ index 403a642..c2b968d 100644
      __try {
          std::memcpy(destination, reinterpret_cast<const void*>(address), size);
          return true;
-@@ -65,9 +106,11 @@ inline void* allocate_near_image(std::uintptr_t base, std::size_t image_size, st
+@@ -65,9 +117,11 @@ inline void* allocate_near_image(std::uintptr_t base, std::size_t image_size, st
  // touches memory past the terminator.
  inline std::ptrdiff_t peek_cstring(std::uintptr_t address, char* destination, std::size_t capacity) noexcept {
      if (!destination || !capacity || address < 0x10000 || address > highest_user_address - capacity) return -1;
