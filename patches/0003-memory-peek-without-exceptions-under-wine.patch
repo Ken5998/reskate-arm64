@@ -1,0 +1,65 @@
+From 8fc2da58f8fa2008204167633eeb0764fa4e04a6 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Kenan=20Kasumovi=C4=87?=
+ <46025606+Ken5998@users.noreply.github.com>
+Date: Sun, 18 Oct 2026 11:30:12 +0000
+Subject: [PATCH] fix(memory): peek without access violations under Wine
+
+---
+ Engine/Core/Platform/memory.h | 27 +++++++++++++++++++++++++++
+ 1 file changed, 27 insertions(+)
+
+diff --git a/Engine/Core/Platform/memory.h b/Engine/Core/Platform/memory.h
+index 403a642..b7254ca 100644
+--- a/Engine/Core/Platform/memory.h
++++ b/Engine/Core/Platform/memory.h
+@@ -16,6 +16,19 @@ inline bool read_bytes(std::uintptr_t address, void* destination, std::size_t si
+ template<class T> requires std::is_trivially_copyable_v<T>
+ bool read(std::uintptr_t address, T& value) noexcept { return read_bytes(address, &value, sizeof(value)); }
+ 
++// Under Wine, peek reads through ReadProcessMemory too: Wine checks the pages without raising
++// an exception, and on ARM64 with FEX a caught access violation can unwind to the wrong frame
++// and end the game. RESKATE_PEEK_EXCEPTIONS=1 keeps the plain copy there.
++inline bool peek_without_exceptions() noexcept {
++    static const bool value = [] {
++        char flag[2]{};
++        if (GetEnvironmentVariableA("RESKATE_PEEK_EXCEPTIONS", flag, sizeof(flag)) == 1 && flag[0] == '1') return false;
++        const auto ntdll = GetModuleHandleW(L"ntdll.dll");
++        return ntdll && GetProcAddress(ntdll, "wine_get_version");
++    }();
++    return value;
++}
++
+ // The same read without a kernel transition: a plain copy that stops at an access violation.
+ // ReadProcessMemory above costs a system call (about 1 us) per read, which adds up on paths
+ // that run every game frame. Use peek there, for game objects expected to be readable; a
+@@ -23,6 +36,7 @@ bool read(std::uintptr_t address, T& value) noexcept { return read_bytes(address
+ inline bool peek_bytes(std::uintptr_t address, void* destination, std::size_t size) noexcept {
+     if (!destination || !size || size > highest_user_address || address < 0x10000 ||
+         address > highest_user_address - size) return false;
++    if (peek_without_exceptions()) return read_bytes(address, destination, size);
+     __try {
+         std::memcpy(destination, reinterpret_cast<const void*>(address), size);
+         return true;
+@@ -65,6 +79,19 @@ inline void* allocate_near_image(std::uintptr_t base, std::size_t image_size, st
+ // touches memory past the terminator.
+ inline std::ptrdiff_t peek_cstring(std::uintptr_t address, char* destination, std::size_t capacity) noexcept {
+     if (!destination || !capacity || address < 0x10000 || address > highest_user_address - capacity) return -1;
++    if (peek_without_exceptions()) {
++        // A page at a time, so a string near the end of readable memory is still found.
++        for (std::size_t done = 0; done < capacity;) {
++            const auto at = address + done;
++            const auto page_left = 0x1000 - (at & 0xfff);
++            const auto chunk = capacity - done < page_left ? capacity - done : page_left;
++            if (!read_bytes(at, destination + done, chunk)) return -1;
++            for (std::size_t i = done; i < done + chunk; ++i)
++                if (destination[i] == '\0') return static_cast<std::ptrdiff_t>(i);
++            done += chunk;
++        }
++        return -1;
++    }
+     __try {
+         const auto* source = reinterpret_cast<const char*>(address);
+         for (std::size_t i = 0; i < capacity; ++i) {
+-- 
+2.43.0
+

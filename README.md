@@ -6,7 +6,7 @@ as the Retroid Pocket 6 with ArmadaOS.
 
 skate. is a Windows x86-64 game, so on these handhelds it runs under Proton
 with FEX emulating x86-64; there is no native port. ReSkate itself works there
-with two changes, which this repository carries:
+with three changes, which this repository carries:
 
 - Its launcher loads `ReSkate.dll` into the game on a thread it creates from
   outside, and under FEX such a thread never starts. The patched launcher
@@ -15,8 +15,13 @@ with two changes, which this repository carries:
   hook. Under FEX a thread can stay stopped after that, holding a lock the
   others need, and the game hangs on a black screen once its window opens.
   Under Wine the patched DLL installs hooks without suspending threads.
+- `ReSkate.dll` reads game memory with a plain copy that catches an access
+  violation when the address is bad. Under FEX the game can unwind such a
+  fault to the wrong place and close a few minutes into loading. Under Wine
+  the patched DLL reads through `ReadProcessMemory`, which fails without a
+  fault.
 
-On Windows both behave as before.
+On Windows all three behave as before.
 
 This repository is an overlay: a patch, scripts and CI. It never contains the
 game or files from it.
@@ -55,7 +60,7 @@ in the loader.
 | Path | What it does |
 | --- | --- |
 | `upstream.json` | The ReSkate release and commit the patch is for, and the Steam depot and manifest of the game build it supports. |
-| `patches/` | The two changes. Under Wine the launcher calls into the game on its gated primary thread instead of `CreateRemoteThread` (`RESKATE_REMOTE_THREAD_INJECTION=1` turns it off), and hooks are installed without suspending threads (`RESKATE_HOOK_SUSPEND_THREADS=1` turns it off). |
+| `patches/` | The three changes. Under Wine the launcher calls into the game on its gated primary thread instead of `CreateRemoteThread` (`RESKATE_REMOTE_THREAD_INJECTION=1` turns it off), hooks are installed without suspending threads (`RESKATE_HOOK_SUSPEND_THREADS=1` turns it off), and memory reads never fault (`RESKATE_PEEK_EXCEPTIONS=1` turns it off). |
 | `scripts/prepare.sh` | Checks out ReSkate at that commit and applies the patches. |
 | `scripts/build.sh` | Builds `ReSkateLauncher.exe` and `ReSkate.dll` with Visual Studio 2022 and Rust, as CI does on Windows. |
 | `scripts/setup-armadaos.sh` | The install above. |
