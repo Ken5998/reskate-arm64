@@ -14,7 +14,8 @@ version="$("$py" -c 'import json,sys; print(json.load(open(sys.argv[1]))["tag"].
 
 "$root/scripts/prepare.sh" "$src"
 cd "$src"
-cmake --preset vs2022-x64 -DDINGOSDK_VERSION="$version"
+# Only the launcher is built here, so the Spotify device (cargo, librespot) stays off.
+cmake --preset vs2022-x64 -DDINGOSDK_VERSION="$version" -DDINGOSDK_CARGO=OFF
 cmake --build --preset release --target dingosdk_launcher --parallel
 mkdir -p "$out"
 cp build/vs2022-x64/Release/ReSkateLauncher.exe "$out/"
