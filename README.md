@@ -70,13 +70,16 @@ launch options too, before `bash -c`: `RESKATE_PERF_GI=30` updates the global
 illumination 30 times a second instead of every frame, `RESKATE_PERF_MESHTREE=1`
 culls meshes through the game's octree, and `RESKATE_PERF_JOBWAKE=50` lets idle
 job workers spin for 50 µs. Try one at a time and compare the CLIENT line.
+`RESKATE_UI_POINTER_PAD_ONLY=1` skips the game's per-frame mouse hit-test for
+good: worth it when you only play on the pad, but mouse hover and clicks in the
+game's menus stop working.
 
 ## What is here
 
 | Path | What it does |
 | --- | --- |
 | `upstream.json` | The ReSkate release and commit the patch is for, and the Steam depot and manifest of the game build it supports. |
-| `patches/` | The four changes. Under Wine the launcher calls into the game on its gated primary thread instead of `CreateRemoteThread` (`RESKATE_REMOTE_THREAD_INJECTION=1` turns it off), hooks are installed without suspending threads (`RESKATE_HOOK_SUSPEND_THREADS=1` turns it off), memory reads check the pages first so they never fault (`RESKATE_PEEK_EXCEPTIONS=1` turns it off), and the UI pointer hit-test is skipped while the game's mouse is still unknown (`RESKATE_UI_POINTER_UNKNOWN_TESTS=1` turns it off); the engine tweaks also read `RESKATE_PERF_*` launch values. |
+| `patches/` | The five changes. Under Wine the launcher calls into the game on its gated primary thread instead of `CreateRemoteThread` (`RESKATE_REMOTE_THREAD_INJECTION=1` turns it off), hooks are installed without suspending threads (`RESKATE_HOOK_SUSPEND_THREADS=1` turns it off), memory reads check the pages first so they never fault (`RESKATE_PEEK_EXCEPTIONS=1` turns it off), and the UI pointer hit-test is skipped while the game's mouse is still unknown (`RESKATE_UI_POINTER_UNKNOWN_TESTS=1` turns it off; what turns the game's cursor on is logged, and `RESKATE_UI_POINTER_PAD_ONLY=1` skips it always); the engine tweaks also read `RESKATE_PERF_*` launch values. |
 | `scripts/prepare.sh` | Checks out ReSkate at that commit and applies the patches. |
 | `scripts/build.sh` | Builds `ReSkateLauncher.exe` and `ReSkate.dll` with Visual Studio 2022 and Rust, as CI does on Windows. |
 | `scripts/setup-armadaos.sh` | The install above. |

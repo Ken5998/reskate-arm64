@@ -1,0 +1,106 @@
+From 6c26be43645ab53bbd8e0b0605093b59c57b2db2 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Kenan=20Kasumovi=C4=87?=
+ <46025606+Ken5998@users.noreply.github.com>
+Date: Mon, 19 Oct 2026 19:20:15 +0000
+Subject: [PATCH] feat(ui): log what turns the game cursor on, and a pad-only
+ switch
+
+The pointer hit-test came back during play on a pad-only handheld while
+the first test was skipped with no cursor. The hooks now log each change
+of the cursor state they act on and each forced-cursor call (the first 40
+of each), so the log says what turned it on.
+
+RESKATE_UI_POINTER_PAD_ONLY=1 skips the hit-test whatever the cursor
+state, for devices played only on a pad.
+---
+ Extension/UI/ui_pointer_skip.cpp | 50 ++++++++++++++++++++++++++++++--
+ 1 file changed, 48 insertions(+), 2 deletions(-)
+
+diff --git a/Extension/UI/ui_pointer_skip.cpp b/Extension/UI/ui_pointer_skip.cpp
+index 74025a5..b78a028 100644
+--- a/Extension/UI/ui_pointer_skip.cpp
++++ b/Extension/UI/ui_pointer_skip.cpp
+@@ -42,9 +42,21 @@ bool unknown_means_no_cursor() noexcept {
+     return value;
+ }
+ 
++// RESKATE_UI_POINTER_PAD_ONLY=1: no mouse is ever used (a handheld played on its pad), so the
++// hit-test is skipped whatever the game's cursor state says. Mouse hover and clicks in the
++// game's own menus stop working; the pad is unaffected.
++bool pad_only() noexcept {
++    static const bool value = [] {
++        char buffer[8]{};
++        return GetEnvironmentVariableA("RESKATE_UI_POINTER_PAD_ONLY", buffer, sizeof(buffer)) && buffer[0] == '1';
++    }();
++    return value;
++}
++
+ // True while a cursor is or may be on screen: asked for, applied, or forced on. Unknown counts
+ // as on, so nothing is skipped until the game has shown which mouse it uses (but see above).
+ bool cursor_in_use() noexcept {
++    if (pad_only()) return false;
+     const auto m = mouse.load(std::memory_order_acquire);
+     std::uint8_t applied{}, requested{};
+     std::int32_t forced{};
+@@ -74,6 +86,26 @@ void log_first_test() noexcept {
+     SetLastError(error);
+ }
+ 
++// Each time the cursor state the hooks act on changes (the first 40 times): what turned it on or off.
++void log_cursor_change(bool in_use) noexcept {
++    static std::atomic<int> last{-1}, logged{};
++    if (last.exchange(in_use ? 1 : 0, std::memory_order_relaxed) == (in_use ? 1 : 0)) return;
++    if (logged.fetch_add(1, std::memory_order_relaxed) >= 40) return;
++    const auto error = GetLastError();
++    const auto m = mouse.load(std::memory_order_acquire);
++    std::uint8_t applied{}, requested{};
++    std::int32_t forced{};
++    if (m) {
++        (void)memory::peek(m + up::mouse_cursor_applied, applied);
++        (void)memory::peek(m + up::mouse_cursor_requested, requested);
++        (void)memory::peek(m + up::mouse_force_count, forced);
++    }
++    logging::log(logging::Level::info, logging::Channel::ui,
++        "UI pointer: hit-test now {} (mouse {}, cursor applied {}, requested {}, forced {}).", in_use ? "run" : "skipped",
++        m ? "known" : "unknown", applied, requested, forced);
++    SetLastError(error);
++}
++
+ std::uintptr_t construct_hook(std::uintptr_t m, std::uintptr_t a, std::uintptr_t b, std::uintptr_t c) {
+     const auto result = original_construct(m, a, b, c);
+     mouse.store(m, std::memory_order_release);
+@@ -97,10 +129,22 @@ void enable_cursor_hook(std::uintptr_t m, std::uintptr_t enable, std::uintptr_t
+ void force_cursor_hook(std::uintptr_t m, std::uintptr_t delta) {
+     mouse.store(m, std::memory_order_release);
+     original_force(m, delta);
++    // The counted override: logged the first 40 times, with the count it leaves.
++    static std::atomic<int> logged{};
++    if (logged.fetch_add(1, std::memory_order_relaxed) < 40) {
++        const auto error = GetLastError();
++        std::int32_t forced{};
++        (void)memory::peek(m + up::mouse_force_count, forced);
++        logging::log(logging::Level::info, logging::Channel::ui, "Game cursor forced {:+d}; force count now {}.",
++            static_cast<std::int32_t>(delta), forced);
++        SetLastError(error);
++    }
+ }
+ void pointer_still_hook(std::uintptr_t ui, std::uintptr_t a, std::uintptr_t b, std::uintptr_t c) {
+     log_first_test();
+-    if (skipping.load(std::memory_order_relaxed) && !cursor_in_use()) {
++    const bool in_use = cursor_in_use();
++    log_cursor_change(in_use);
++    if (skipping.load(std::memory_order_relaxed) && !in_use) {
+         skipped.fetch_add(1, std::memory_order_relaxed);
+         return;
+     }
+@@ -110,7 +154,9 @@ void pointer_still_hook(std::uintptr_t ui, std::uintptr_t a, std::uintptr_t b, s
+ }
+ void pointer_moved_hook(std::uintptr_t ui, std::uintptr_t a, std::uintptr_t b, std::uintptr_t c) {
+     log_first_test();
+-    if (skipping.load(std::memory_order_relaxed) && !cursor_in_use()) {
++    const bool in_use = cursor_in_use();
++    log_cursor_change(in_use);
++    if (skipping.load(std::memory_order_relaxed) && !in_use) {
+         skipped.fetch_add(1, std::memory_order_relaxed);
+         return;
+     }
