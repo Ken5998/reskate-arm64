@@ -7,6 +7,12 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+  # The weekly upstream check (upstream-check.yml) runs it on its branch.
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        default: ''
 
 jobs:
   launcher:
@@ -14,6 +20,8 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
       - name: Build the patched launcher
         shell: bash
         run: scripts/build.sh out

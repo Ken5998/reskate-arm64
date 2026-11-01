@@ -5,6 +5,12 @@ name: Release
 
 on:
   workflow_dispatch:
+  # The weekly upstream check (upstream-check.yml) releases main after merging.
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        default: ''
 
 permissions:
   contents: write
@@ -16,6 +22,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
+          ref: ${{ inputs.ref }}
           fetch-depth: 0
       - name: Build the patched launcher
         shell: bash
@@ -45,5 +52,5 @@ jobs:
             gh release edit "v$version" --notes-file notes.md
           else
             gh release create "v$version" "$archive" --title "ReSkate ${tag#v} launcher for ArmadaOS ($version)" \
-              --notes-file notes.md --target "$GITHUB_SHA"
+              --notes-file notes.md --target "$(git rev-parse HEAD)"
           fi

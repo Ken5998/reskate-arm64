@@ -83,6 +83,8 @@ game's menus stop working.
 | `scripts/prepare.sh` | Checks out ReSkate at that commit and applies the patches. |
 | `scripts/build.sh` | Builds `ReSkateLauncher.exe` and `ReSkate.dll` with Visual Studio 2022 and Rust, as CI does on Windows. |
 | `scripts/setup-armadaos.sh` | The install above. |
+| `scripts/rebase-upstream.sh` | Moves the patches onto a newer ReSkate release and records it in `upstream.json`. |
+| `.github/workflows/upstream-check.yml` | Every Monday it looks for a new ReSkate release; when one is out it rebases the patches, builds them and, if the build is green, merges and publishes a new release. If a patch no longer applies or the build fails, it opens an issue instead. |
 
 Releases hold only `ReSkateLauncher.exe` and `ReSkate.dll`; everything else
 comes from ReSkate's own release of the same version. These builds never
