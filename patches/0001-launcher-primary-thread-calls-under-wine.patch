@@ -1,4 +1,4 @@
-From ffa736be174c27bb8a287ba1720a49a1501fde82 Mon Sep 17 00:00:00 2001
+From 2d6b57eccafb1ebfcd806574e8de28a0ffe4294f Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Kenan=20Kasumovi=C4=87?=
  <46025606+Ken5998@users.noreply.github.com>
 Date: Sun, 18 Oct 2026 09:58:25 +0000
@@ -10,10 +10,10 @@ Subject: [PATCH] fix(launcher): call into the gated child on its primary
  1 file changed, 98 insertions(+), 7 deletions(-)
 
 diff --git a/Launcher/launch.cpp b/Launcher/launch.cpp
-index 10c2f5c..4bcc0d5 100644
+index 86342aa..c8e75d4 100644
 --- a/Launcher/launch.cpp
 +++ b/Launcher/launch.cpp
-@@ -25,6 +25,7 @@
+@@ -27,6 +27,7 @@
  #include "Engine/Game/Build/supported_build.h"
  #include <algorithm>
  #include <fstream>
@@ -21,7 +21,7 @@ index 10c2f5c..4bcc0d5 100644
  #include <optional>
  #include <sstream>
  #include <stdexcept>
-@@ -93,8 +94,8 @@ private:
+@@ -95,8 +96,8 @@ private:
  
  class RemoteAllocation {
  public:
@@ -32,7 +32,7 @@ index 10c2f5c..4bcc0d5 100644
          if (!value_) throw std::runtime_error("VirtualAllocEx failed");
      }
      ~RemoteAllocation() { if (value_) VirtualFreeEx(process_, value_, 0, MEM_RELEASE); }
-@@ -436,7 +437,96 @@ DWORD run_remote_thread(HANDLE process, std::uintptr_t start, void* parameter,
+@@ -438,7 +439,96 @@ DWORD run_remote_thread(HANDLE process, std::uintptr_t start, void* parameter,
      return result;
  }
  
@@ -130,7 +130,7 @@ index 10c2f5c..4bcc0d5 100644
      const auto path = dll.wstring();
      const auto byte_count = (path.size() + 1) * sizeof(wchar_t);
      RemoteAllocation remote_path(process, byte_count);
-@@ -448,9 +538,10 @@ RemoteModule inject_dll(HANDLE process, const fs::path& dll) {
+@@ -450,9 +540,10 @@ RemoteModule inject_dll(HANDLE process, const fs::path& dll) {
      if (!hook_note.empty())
          dingosdk::logging::write(dingosdk::logging::Level::warning, dingosdk::logging::Channel::launcher, hook_note);
      std::wostringstream address;
@@ -143,7 +143,7 @@ index 10c2f5c..4bcc0d5 100644
      // A thread exit code is only 32 bits and cannot carry an x64 HMODULE. Confirm
      // success and obtain the full module base from the target's module list.
      const auto module = find_remote_module(process, dll);
-@@ -882,14 +973,14 @@ DWORD start_game(const Session& session, const launcher::LaunchOptions& options,
+@@ -972,7 +1063,7 @@ DWORD start_game(const Session& session, const launcher::LaunchOptions& options,
          loader_ready << L", skipped " << exiting << L" already exiting";
      logging::write(logging::Level::info, logging::Channel::launcher, loader_ready.str());
  
@@ -152,11 +152,15 @@ index 10c2f5c..4bcc0d5 100644
      const auto initialize_address = remote_dll.base + initialize_rva;
      if (initialize_address < remote_dll.base || initialize_rva >= remote_dll.size)
          throw std::runtime_error("Remote DingoSDKDebugInitialize address is invalid");
-     std::wostringstream initializing;
-     initializing << L"Calling DingoSDKDebugInitialize at 0x" << std::hex << initialize_address;
+@@ -981,7 +1072,7 @@ DWORD start_game(const Session& session, const launcher::LaunchOptions& options,
      logging::write(logging::Level::info, logging::Channel::launcher, initializing.str());
+     const auto log = paths.logs / L"ReSkate.log";
+     const auto log_start = file_size_or_zero(log);
 -    const auto initialized = run_remote_thread(child.process(), initialize_address, nullptr,
 +    const auto initialized = run_in_child(child.process(), child.primary_thread(), initialize_address, nullptr,
          L"DingoSDKDebugInitialize", initialize_wait_ms);
-     if (!initialized) throw std::runtime_error("DingoSDKDebugInitialize returned FALSE");
-     logging::write(logging::Level::info, logging::Channel::launcher, L"ReSkate.dll initialization confirmed");
+     if (!initialized)
+         throw std::runtime_error(startup_failure_message(child.process(),
+-- 
+2.43.0
+
