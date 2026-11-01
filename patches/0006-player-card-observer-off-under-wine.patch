@@ -1,0 +1,43 @@
+From bf0207140526b6f1a2e95d9e5e7644245f060437 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Kenan=20Kasumovi=C4=87?=
+ <46025606+Ken5998@users.noreply.github.com>
+Date: Sun, 1 Nov 2026 22:53:08 +0000
+Subject: [PATCH] perf(runtime): leave the player card observer off under Wine
+
+The expression argument binder hook calls the player card observer, which
+only writes diagnostics, for every expression the game binds: about 1 ms a
+frame under Wine with FEX. Under Wine it stays off; RESKATE_PLAYER_CARD_OBSERVER=1
+turns it back on.
+---
+ Runtime/runtime_init.cpp | 14 +++++++++++++-
+ 1 file changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/Runtime/runtime_init.cpp b/Runtime/runtime_init.cpp
+index 66d84f2..4fb48b1 100644
+--- a/Runtime/runtime_init.cpp
++++ b/Runtime/runtime_init.cpp
+@@ -447,8 +447,20 @@ extern "C" __declspec(dllexport) BOOL WINAPI DingoSDKDebugInitialize() {
+         const bool neighborhood_unlock_provider =
+             (global_offline_hook && progression_guard_armed) &&
+             dingosdk::prepare_neighborhood_unlock_override(r.base);
+-        if (neighborhood_unlock_provider)
++        // The player card observer only writes diagnostics, yet the binder calls it for every
++        // expression the game binds, about 1 ms a frame under Wine with FEX. Under Wine it stays
++        // off; RESKATE_PLAYER_CARD_OBSERVER=1 turns it back on.
++        const bool player_card_observer = [] {
++            const auto ntdll = GetModuleHandleW(L"ntdll.dll");
++            if (!ntdll || !GetProcAddress(ntdll, "wine_get_version")) return true;
++            char value[4]{};
++            return GetEnvironmentVariableA("RESKATE_PLAYER_CARD_OBSERVER", value, sizeof(value)) && value[0] == '1';
++        }();
++        if (neighborhood_unlock_provider && player_card_observer)
+             dingosdk::set_expression_binder_observer(&observe_player_card_expression);
++        if (neighborhood_unlock_provider && !player_card_observer)
++            dingosdk::logging::log(dingosdk::logging::Level::info, dingosdk::logging::Channel::runtime,
++                "Player card observer: off under Wine (RESKATE_PLAYER_CARD_OBSERVER=1 turns it on).");
+         if (neighborhood_unlock_provider)
+             (void)dingosdk::set_neighborhood_unlock_override_enabled(dingosdk::local_profile_access().neighborhoods);
+         record("{\"event\":\"neighborhood_unlock_provider_initialized\",\"prepared\":" +
+-- 
+2.43.0
+
