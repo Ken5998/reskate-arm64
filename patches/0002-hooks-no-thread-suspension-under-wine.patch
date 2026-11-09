@@ -1,4 +1,4 @@
-From 346041c8125d0d24727936c881c329a130e47b36 Mon Sep 17 00:00:00 2001
+From 92b792e166aa8bf8d0ca2dde084e422ef238b22e Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Kenan=20Kasumovi=C4=87?=
  <46025606+Ken5998@users.noreply.github.com>
 Date: Sun, 18 Oct 2026 10:35:39 +0000
@@ -10,7 +10,7 @@ Subject: [PATCH] fix(hooks): write hooks without suspending other threads
  1 file changed, 14 insertions(+), 1 deletion(-)
 
 diff --git a/Engine/Core/Hooks/hooks.cpp b/Engine/Core/Hooks/hooks.cpp
-index 974fb1a..95f0520 100644
+index 5536059..4e1f631 100644
 --- a/Engine/Core/Hooks/hooks.cpp
 +++ b/Engine/Core/Hooks/hooks.cpp
 @@ -112,6 +112,19 @@ struct Threads {

@@ -1,4 +1,4 @@
-From bf0207140526b6f1a2e95d9e5e7644245f060437 Mon Sep 17 00:00:00 2001
+From 5f64aae4081e82cddfea9a73db7db472440eb856 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Kenan=20Kasumovi=C4=87?=
  <46025606+Ken5998@users.noreply.github.com>
 Date: Sun, 1 Nov 2026 22:53:08 +0000
@@ -13,10 +13,10 @@ turns it back on.
  1 file changed, 13 insertions(+), 1 deletion(-)
 
 diff --git a/Runtime/runtime_init.cpp b/Runtime/runtime_init.cpp
-index 66d84f2..4fb48b1 100644
+index f857c1c..7d49add 100644
 --- a/Runtime/runtime_init.cpp
 +++ b/Runtime/runtime_init.cpp
-@@ -447,8 +447,20 @@ extern "C" __declspec(dllexport) BOOL WINAPI DingoSDKDebugInitialize() {
+@@ -449,8 +449,20 @@ extern "C" __declspec(dllexport) BOOL WINAPI DingoSDKDebugInitialize() {
          const bool neighborhood_unlock_provider =
              (global_offline_hook && progression_guard_armed) &&
              dingosdk::prepare_neighborhood_unlock_override(r.base);

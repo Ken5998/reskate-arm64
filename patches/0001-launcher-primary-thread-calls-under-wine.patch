@@ -1,4 +1,4 @@
-From 2d6b57eccafb1ebfcd806574e8de28a0ffe4294f Mon Sep 17 00:00:00 2001
+From aae01205e506e9f9323c2b73384d2146eef8f17d Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Kenan=20Kasumovi=C4=87?=
  <46025606+Ken5998@users.noreply.github.com>
 Date: Sun, 18 Oct 2026 09:58:25 +0000
@@ -10,7 +10,7 @@ Subject: [PATCH] fix(launcher): call into the gated child on its primary
  1 file changed, 98 insertions(+), 7 deletions(-)
 
 diff --git a/Launcher/launch.cpp b/Launcher/launch.cpp
-index 86342aa..c8e75d4 100644
+index 5ec36f6..cd27f0e 100644
 --- a/Launcher/launch.cpp
 +++ b/Launcher/launch.cpp
 @@ -27,6 +27,7 @@
@@ -143,7 +143,7 @@ index 86342aa..c8e75d4 100644
      // A thread exit code is only 32 bits and cannot carry an x64 HMODULE. Confirm
      // success and obtain the full module base from the target's module list.
      const auto module = find_remote_module(process, dll);
-@@ -972,7 +1063,7 @@ DWORD start_game(const Session& session, const launcher::LaunchOptions& options,
+@@ -971,7 +1062,7 @@ DWORD start_game(const Session& session, const launcher::LaunchOptions& options,
          loader_ready << L", skipped " << exiting << L" already exiting";
      logging::write(logging::Level::info, logging::Channel::launcher, loader_ready.str());
  
@@ -152,7 +152,7 @@ index 86342aa..c8e75d4 100644
      const auto initialize_address = remote_dll.base + initialize_rva;
      if (initialize_address < remote_dll.base || initialize_rva >= remote_dll.size)
          throw std::runtime_error("Remote DingoSDKDebugInitialize address is invalid");
-@@ -981,7 +1072,7 @@ DWORD start_game(const Session& session, const launcher::LaunchOptions& options,
+@@ -980,7 +1071,7 @@ DWORD start_game(const Session& session, const launcher::LaunchOptions& options,
      logging::write(logging::Level::info, logging::Channel::launcher, initializing.str());
      const auto log = paths.logs / L"ReSkate.log";
      const auto log_start = file_size_or_zero(log);

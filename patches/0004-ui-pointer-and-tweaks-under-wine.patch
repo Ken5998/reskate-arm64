@@ -1,4 +1,4 @@
-From fdafa2696009b91f7df3e5a79cc1508276c8df71 Mon Sep 17 00:00:00 2001
+From ba6b46f089feec8cec21c0ba740e063502ea2170 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Kenan=20Kasumovi=C4=87?=
  <46025606+Ken5998@users.noreply.github.com>
 Date: Sun, 18 Oct 2026 18:37:04 +0000
@@ -20,7 +20,7 @@ keyboard to open the console.
  2 files changed, 62 insertions(+), 3 deletions(-)
 
 diff --git a/Extension/Settings/engine_tweaks.cpp b/Extension/Settings/engine_tweaks.cpp
-index 09d8d40..b0f8f4b 100644
+index 523d008..4184c3a 100644
 --- a/Extension/Settings/engine_tweaks.cpp
 +++ b/Extension/Settings/engine_tweaks.cpp
 @@ -11,6 +11,7 @@
@@ -28,11 +28,11 @@ index 09d8d40..b0f8f4b 100644
  #include <atomic>
  #include <bit>
 +#include <cstdlib>
+ #include <cstring>
  #include <format>
  #include <mutex>
- 
-@@ -332,6 +333,25 @@ bool install(std::uintptr_t b) noexcept {
-         if (available(tweak) && !set(tweak, default_value(tweak), error))
+@@ -382,6 +383,25 @@ bool install(std::uintptr_t b) noexcept {
+         if (available(tweak) && !set(tweak, wanted, error))
              logging::log(logging::Level::warning, logging::Channel::runtime, "Engine tweaks: {} left off: {}", name(tweak), error);
      }
 +    // Launch-time values for the tweaks the console sets (`perf gi`, `perf meshtree`, `perf jobwake`),
